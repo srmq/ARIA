@@ -1,0 +1,5 @@
+ARIA Version 2.9.4
+January 25, 2018
+Adept MobileRobots
+Linux 
+gcc-5.4.0

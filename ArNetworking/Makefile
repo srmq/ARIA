@@ -1,0 +1,301 @@
+CFILEEXT:=cpp
+# Make sure we're using a compiler (we probably don't need to define
+# it but we have been so here it is unless it was already set)
+ifndef CXX
+CXX=g++
+endif
+BARECXXFLAGS:=-fPIC -g -Wall -D_REENTRANT
+CXXFLAGS+=$(BARECXXFLAGS) -fno-exceptions 
+CXXINC:=-I../include -Iinclude 
+
+# these are used by programs (e.g. examples, tests, utils)), not library:
+CXXLINK:=-L../lib -lAria -lArNetworking
+CXXSTATICLINK=-L../lib -Wl,-Bstatic -lArNetworking -lAria -Wl,-Bdynamic -lpthread -ldl -lrt -Wl,-Bstatic -lstdc++ -Wl,-Bdynamic
+
+host:=$(shell uname | cut -d _ -f 1)
+ifeq ($(host),MINGW32)
+  $(info Building on MinGW)
+  #CXXFLAGS+=-mwindows -mms-bitfields -D__MINGW__ -DMINGW
+  CXXFLAGS+=-mms-bitfields -D__MINGW__ -DMINGW
+  CXXLINK+=-lpthreadGC2 -lwinmm -lws2_32 -lstdc++
+  CXXSTATICLINK=-L../lib -Wl,-Bstatic -lArNetworking -lAria -lpthread -Wl,-Bdynamic -lwinmm -lws2_32 -lstdc++
+  binsuffix:=.exe
+else
+  BARECXXFLAGS+=-fPIC
+  CXXLINK+=-lpthread -ldl -lstdc++
+  CXXSTATICLINK+=-lpthread -ldl -lrt -lstdc++
+  binsuffix:=
+  ifeq ($(host),Darwin)
+    $(info Bulding on MacOSX (Darwin))
+    CXXFLAGS+=-DMACOSX
+    sosuffix:=dylib
+  else
+    CXXLINK+=-lrt
+    sosuffix:=so
+  endif
+endif
+
+ifdef JAVA_BIN
+JAVAC:=$(JAVA_BIN)/javac
+JAR:=$(JAVA_BIN)/jar
+else
+JAVAC:=javac
+JAR:=jar
+endif
+
+ifndef JAVA_INCLUDE
+JAVA_INCLUDE:=/usr/lib/jvm/default-java/include
+endif
+
+
+ifndef SWIG
+SWIG:=swig
+endif
+
+CFILES:= \
+	ArCentralManager.cpp \
+	ArCentralForwarder.cpp \
+	ArClientBase.cpp \
+	ArClientData.cpp \
+	ArClientHandlerConfig.cpp \
+	ArClientFileUtils.cpp \
+	ArClientSimpleConnector.cpp \
+	ArClientSwitchManager.cpp \
+	ArClientArgUtils.cpp \
+	ArClientHandlerRobotUpdate.cpp \
+	ArClientRatioDrive.cpp \
+	ArHybridForwarderVideo.cpp \
+	ArMapChanger.cpp \
+	ArNetPacket.cpp \
+	ArNetPacketReceiverUdp.cpp \
+	ArNetPacketReceiverTcp.cpp \
+	ArNetPacketSenderTcp.cpp \
+	ArServerBase.cpp \
+	ArServerClient.cpp \
+	ArServerData.cpp \
+	ArServerFileUtils.cpp \
+	ArServerHandlerCamera.cpp \
+	ArServerHandlerCameraCollection.cpp \
+	ArServerHandlerCommands.cpp \
+	ArServerHandlerCommMonitor.cpp \
+	ArServerHandlerConfig.cpp \
+	ArServerHandlerMap.cpp \
+	ArServerHandlerMapping.cpp \
+	ArServerHandlerPopup.cpp \
+	ArServerMode.cpp \
+	ArServerModeDrive.cpp \
+	ArServerModeIdle.cpp \
+	ArServerModeJogPosition.cpp \
+	ArServerModeRatioDrive.cpp \
+	ArServerModeStop.cpp \
+  ArServerModeTestLoop.cpp \
+	ArServerModeWander.cpp \
+	ArServerInfoDrawings.cpp \
+	ArServerInfoRobot.cpp \
+	ArServerInfoSensor.cpp 	\
+	ArServerInfoStrings.cpp \
+	ArServerSimpleCommands.cpp \
+	ArServerSimpleOpener.cpp \
+	ArServerUserInfo.cpp \
+	ArTempDirectoryHelper.cpp \
+	md5.cpp
+
+
+OTFILES:=$(patsubst %.$(CFILEEXT),%.o,$(CFILES))
+OFILES:=$(patsubst %,../obj/%,$(OTFILES))
+
+TARGETS:=../lib/libArNetworking.$(sosuffix) examples/serverDemo examples/clientDemo
+
+EXAMPLES_CPP:=$(shell find examples -name "*.$(CFILEEXT)" | grep -v Mod.cpp)
+EXAMPLES:=$(patsubst %.$(CFILEEXT),%,$(EXAMPLES_CPP))
+
+TESTS_CPP:=$(shell find tests -name "*.$(CFILEEXT)" | grep -v Mod.cpp)
+TESTS:=$(patsubst %.$(CFILEEXT),%,$(TESTS_CPP))
+
+SRC_FILES:=$(patsubst %,src/%,$(CFILES))
+HEADER_FILES:=$(shell find include -type f -name \*.h)
+
+all: dirs $(TARGETS)
+
+dirs:
+	@mkdir -p -v ../obj
+	@mkdir -p -v ../lib
+
+../lib/libArNetworking.$(sosuffix): $(OFILES) ../lib/libAria.$(sosuffix) 
+	@mkdir -p -v ../obj
+	@mkdir -p -v ../lib
+	$(CXX) -shared 	-Xlinker -Bstatic -lstdc++ -Xlinker -Bdynamic -o $(@) $(OFILES) 
+
+../lib/libArNetworking.a: $(OFILES) ../lib/libAria.a 
+	@mkdir -p -v ../obj
+	@mkdir -p -v ../lib
+	ar -cr $(@) $(OFILES)
+	ranlib $(@)
+
+
+examples: dirs $(EXAMPLES) 
+
+
+tests: dirs $(TESTS) 
+
+clean: cleanExamples
+	rm -f ../lib/libArNetworking.$(sosuffix) ../lib/libArNetworking.a \
+	`find . -name core` $(OFILES) `find . -name '*~'`
+
+cleanPython:
+	-rm ../python/_ArNetworkingPy.$(sosuffix)
+	-rm ../python/ArNetworkingPy.py
+	-rm ../python/ArNetworkingPy.pyc
+	-rm ../python/ArNetworkingPy_wrap.cpp
+	-rm ../obj/ArNetworkingPy_wrap.o
+
+cleanExamples:
+	rm -f $(EXAMPLES)
+
+cleanDoc:
+	-rm -f docs/*.html docs/*.png docs/*.png
+	-rm -rf docs/tmp
+
+fullClean: clean cleanExamples cleanJava cleanPython cleanDoc
+
+# Rules to generate API documentation for local/personal use (rather than part of a
+# released package; that uses the packaging shell scripts instead)
+DATESTAMP=$(shell date +%Y%m%d)
+DATE=$(shell date +'%B %d, %Y')
+docs: doc
+doc: docs/index.html
+docs/index.html: $(SRC_FILES) $(HEADER_FILES) $(EXAMPLES_CPP) doxygen.conf.in docs/options/all_options.dox ../docs/index.html docs/RemoteRequestAPI.dox
+	@echo Removing old ArNetworking documentation...
+	$(MAKE) cleanDoc
+	@echo
+	@echo Making local ArNetworking documentation with version $(DATESTAMP)
+	sed -e "s/@VERSION@/dev$(DATESTAMP)/g" -e "s/@DATE@/$(DATE)/g" <doxygen.conf.in >doxygen.conf
+	-mkdir docs
+	doxygen doxygen.conf
+	@echo
+	@echo Done making ArNetworking docs. Open docs/index.html in a web browser.
+	
+../docs/index.html: FORCE
+	$(MAKE) -C .. docs/index.html
+
+# Force rebuilding of Makefile.dep:
+dep: clean cleanDep FORCE
+	$(MAKE) Makefile.dep
+
+cleanDep: FORCE
+	-rm Makefile.dep
+
+Makefile.dep:
+	if [ -f `echo src/*.cpp | cut -d' ' -f1` ]; then \
+	$(CXX) $(CXXFLAGS) $(CXXINC) -MM src/*.cpp | \
+	awk '$$1 ~ /:/{printf "../obj/%s\n", $$0} $$1 !~ /:/' > Makefile.dep; fi
+	if [ -f `echo examples/*.cpp | cut -d' ' -f1` ]; then \
+        $(CXX) $(CXXFLAGS) $(CXXINC) -MM examples/*.cpp | \
+        awk '$$1 ~ /:/{printf "examples/%s\n", $$0} $$1 !~ /:/' | \
+        sed 's/\.o//' >> Makefile.dep; fi
+
+../lib/libAria.$(sosuffix): FORCE
+	$(MAKE) -C .. dirs lib/libAria.$(sosuffix)
+
+../lib/libAria.a: FORCE
+	$(MAKE) -C .. dirs lib/libAria.a
+
+../obj/%.o : src/%.cpp 
+	$(CXX) $(CXXFLAGS) $(CXXINC) -c $< -o $@
+
+../obj/%.o : src/%.c 
+	$(CXX) $(CXXFLAGS) $(CXXINC) -c $< -o $@
+
+# Don't build .o files if their library is up to date with respect to source files:
+.INTERMEDIATE: $(OFILES)
+
+# But don't delete .o files if we do make them in order to make a library:
+.PRECIOUS: $(OFILES)
+
+examples/%: examples/%.$(CFILEEXT) ../lib/libAria.$(sosuffix) ../lib/libArNetworking.$(sosuffix)
+	$(CXX) $(CXXFLAGS) $(CXXINC) $< -o $@ $(CXXLINK)
+
+tests/%: tests/%.$(CFILEEXT) ../lib/libAria.$(sosuffix) ../lib/libArNetworking.$(sosuffix) 
+	$(CXX) $(CXXFLAGS) $(CXXINC) $< -o $@ $(CXXLINK)
+
+
+examples/%Static: examples/%.$(CFILEEXT) ../lib/libAria.a ../lib/libArNetworking.a 
+	$(CXX) $(CXXFLAGS) $(CXXINC) $< -o $@ $(CXXSTATICLINK)
+	strip $@
+
+tests/%Static: tests/%.$(CFILEEXT) ../lib/libAria.a ../lib/libArNetworking.a 
+	$(CXX) $(CXXFLAGS) $(CXXINC) $< -o $@ $(CXXSTATICLINK)
+	strip $@
+
+CommandLineOptions.txt.in docs/options/all_options.dox: genCommandLineOptionDocs
+	-mkdir docs/options
+	./genCommandLineOptionDocs
+
+genCommandLineOptionDocs: ../utils/genCommandLineOptionDocs.cpp ../lib/libAria.$(sosuffix) ../lib/libArNetworking.$(sosuffix) src/ArServerSimpleOpener.cpp src/ArClientSimpleConnector.cpp src/ArClientSwitchManager.cpp
+	$(CXX) $(CXXFLAGS) -DFOR_ARNETWORKING $(CXXINC) $< -o $@ $(CXXLINK)
+
+## Python SWIG wrapper ##
+
+ifdef PYTHON_INCLUDE
+PYTHON_INCLUDE_FLAGS=-I$(PYTHON_INCLUDE)
+else
+ifdef DIST_INSTALL
+$(warning WARNING using default value of /usr/include/python2.7 for PYTHON_INCLUDE directory. Set PYTHON_INCLUDE environment variable if you would like to use a different version of the Python C development library to build the Python ARIA wrapper.)
+endif
+PYTHON_INCLUDE:=/usr/include/python2.7
+PYTHON_INCLUDE_FLAGS=-I/usr/include/python2.7
+endif
+
+python: ariaPython ../python/_ArNetworkingPy.$(sosuffix)
+
+ariaPython:
+	$(MAKE) -C .. python
+
+../python/ArNetworkingPy_wrap.cpp ../python/ArNetworkingPy.py: include/wrapper.i $(HEADER_FILES)
+	cd ../python; $(SWIG) -c++ -python -module ArNetworkingPy -Dlinux -DAREXPORT -DARNETWORKING_WRAPPER -o ArNetworkingPy_wrap.cpp -I../include -I../ArNetworking/include ../ArNetworking/include/wrapper.i  
+
+../python/_ArNetworkingPy.$(sosuffix): ../python/ArNetworkingPy_wrap.cpp ../lib/libArNetworking.$(sosuffix) 
+	$(CXX) $(BARECXXFLAGS) $(CXXINC) -I$(PYTHON_INCLUDE) -DARNETWORKING_WRAPPER -shared -o $(@) $< -lpthread -ldl -lrt \
+	-L../lib -lAria -lArNetworking
+
+
+## Java SWIG wrapper ##
+
+
+java: ../lib/libArNetworkingJava.$(sosuffix) ../java/ArNetworking.jar
+
+../java/Aria.jar:
+	$(MAKE) -C .. java
+
+../java/ArNetworking.jar: ../java/com/mobilerobots/ArNetworking/ArServerBase.class
+	cd ../java ; $(JAR) cf ArNetworking.jar com/mobilerobots/ArNetworking/*.class
+
+../java/ArNetworkingJava_wrap.cpp ../java/com/mobilerobots/ArNetworking/ArServerBase.java: include/wrapper.i $(HEADER_FILES)
+	-mkdir -p ../java/com/mobilerobots/ArNetworking
+	rm ../java/com/mobilerobots/ArNetworking/*.java ../java/ArNetworkingJava_wrap.cpp ../java/ArNetworkingJava_wrap.h ; $(SWIG) -c++ -java -package com.mobilerobots.ArNetworking -outdir ../java/com/mobilerobots/ArNetworking -module ArNetworkingJava -Dlinux -DAREXPORT -DARNETWORKING_WRAPPER -o ../java/ArNetworkingJava_wrap.cpp -I../include -Iinclude include/wrapper.i 
+ 
+../java/com/mobilerobots/ArNetworking/ArServerBase.class: ../java/com/mobilerobots/ArNetworking/ArServerBase.java ../java/Aria.jar
+	 rm ../java/com/mobilerobots/ArNetworking/*.class; $(JAVAC) -classpath ../java/Aria.jar:../java ../java/com/mobilerobots/ArNetworking/*.java 
+
+cleanJava:
+	-rm ../java/ArNetworking.jar
+	-rm -r ../java/com/mobilerobots/ArNetworking
+	-rm ../java/ArNetworkingJava_wrap.* ../obj/ArNetworkingJava_wrap.o ../lib/libArNetworkingJava.$(sosuffix)
+
+../lib/libArNetworkingJava.$(sosuffix): ../obj/ArNetworkingJava_wrap.o ../lib/libArNetworking.$(sosuffix)
+	$(CXX) $(BARECXXFLAGS) -shared -o $(@) ../obj/ArNetworkingJava_wrap.o -lpthread -ldl -lrt -L../lib -lAria -lArNetworking
+
+../obj/ArNetworkingJava_wrap.o: ../java/ArNetworkingJava_wrap.cpp
+	@ if test -z "$(JAVA_INCLUDE)"; then echo "*** Error: JAVA_INCLUDE is not set, building ArNetworkingPy_wrap.cpp will probably fail! ***"; fi
+	$(CXX) -c $(BARECXXFLAGS) $(CXXINC) -I$(JAVA_INCLUDE) -I$(JAVA_INCLUDE)/linux $< -o $@
+
+tags: $(SRC_FILES) $(HEADER_FILES)
+	ctags $(SRC_FILES) $(HEADER_FILES)
+
+ctags: tags
+
+include Makefile.dep
+
+FORCE:
+
+.PHONY: all dirs examples tests clean cleanPython cleanJava cleanExamples cleanDoc fullClean docs doc dep cleanDep python ariaPython java ctags
